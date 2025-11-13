@@ -5,5 +5,4 @@ requests==2.32.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
 playwright==1.44.0
-
-greenlet==2.0.2
+greenlet==3.0.3
