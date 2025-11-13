@@ -736,20 +736,30 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   }
   
-  function downloadImage(src, filename) {
-    try {
-      const a = document.createElement('a');
-      a.href = src;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      showNotification(`Downloaded: ${filename}`);
-    } catch (error) {
-      console.error('Image download error:', error);
-      showNotification('Image download failed. Please try again.');
-    }
+ async function downloadImage(src, filename) {
+  try {
+    const response = await fetch(src, { mode: 'cors' });
+    if (!response.ok) throw new Error('Image fetch failed');
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.style.display = 'none';
+
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showNotification(`Downloaded: ${filename}`);
+  } catch (error) {
+    console.error('Safe image download error:', error);
+    showNotification('Image download failed. Please try again.');
   }
+}
+
   
   async function downloadSelectedImagesAsZip() {
     if (selectedImages.size === 0) return;
@@ -817,25 +827,61 @@ document.addEventListener('DOMContentLoaded', function() {
       downloadSelectedImagesIndividually();
     }
   }
-  
-  function downloadSelectedImagesIndividually() {
-    let count = 0;
-    selectedImages.forEach(src => {
-      setTimeout(() => {
-        try {
-          const extension = getImageExtensionFromUrl(src) || 'jpg';
-          const filename = `image-${count + 1}.${extension}`;
-          downloadImage(src, filename);
-        } catch (error) {
-          console.error(`Error downloading image ${src}:`, error);
+  async function downloadImageSafe(src, filename) {
+    try {
+        // 1. Fetch the image content as a Blob
+        const response = await fetch(src, { mode: 'cors' }); 
+        
+        if (!response.ok) {
+            console.error(`Failed to fetch image for safe download: ${response.status} ${response.statusText} - ${src}`);
+            showNotification(`Failed to download: ${filename}`);
+            return;
         }
-      }, count * 300); // Stagger downloads to avoid browser issues
-      count++;
+        
+        const blob = await response.blob();
+        
+        // 2. Use the existing downloadFile function to create a download link 
+        //    from the Blob and click it, which is the non-redirecting method.
+        downloadFile(blob, blob.type, filename); 
+        
+    } catch (error) {
+        // This catches network issues or cross-origin errors
+        console.error(`Error during safe image download of ${src}:`, error);
+        showNotification(`Download failed for ${filename}. Try again or ensure CORS/permissions.`);
+    }
+}
+
+
+function downloadSelectedImagesIndividually() {
+    showNotification(`Preparing ${selectedImages.size} images for download individually...`);
+    let count = 0;
+    
+    selectedImages.forEach(src => {
+        // Stagger the calls to avoid hitting browser limits or triggering anti-leeching measures
+        setTimeout(async () => {
+            try {
+                // Determine extension and filename before downloading
+                const extension = getImageExtensionFromUrl(src) || 'jpg';
+                const filename = `image-${count + 1}.${extension}`;
+                
+                // *** CALL THE NEW, SAFE DOWNLOAD FUNCTION ***
+                await downloadImageSafe(src, filename);
+                
+            } catch (error) {
+                // Errors from the inner function will be caught in downloadImageSafe
+                console.error(`Outer download error for ${src}:`, error);
+            }
+        }, count * 300); // 300ms delay between each download
+        
+        count++;
     });
     
-    showNotification(`Downloading ${selectedImages.size} images individually...`);
-  }
-  
+    showNotification(`Initiated download for ${selectedImages.size} images. Please check your downloads folder.`);
+}
+
+
+
+
   async function downloadAsZip(data) {
     try {
       showNotification('Preparing complete dataset for download...');
