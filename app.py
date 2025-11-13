@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, send_file
+
+from flask import Flask, request, jsonify, send_file, render_template
 from flask_cors import CORS
 import requests
 from bs4 import BeautifulSoup
@@ -125,15 +126,13 @@ def parse_html(html, base_url):
         "html": html
     }
 
-@app.route('/', methods=['GET'])
+
+
+
+@app.route('/')
 def home():
-    return jsonify({
-        "message": "Web Scraper API is running!", 
-        "status": "healthy",
-        "endpoints": {
-            "scrape": "POST /scrape"
-        }
-    })
+    return render_template('index.html')
+
 
 @app.route('/scrape', methods=['POST', 'OPTIONS'])
 def scrape():
