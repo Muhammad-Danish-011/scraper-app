@@ -7,6 +7,19 @@ document.addEventListener('DOMContentLoaded', function() {
   const downloadAllBtn = document.getElementById('downloadAllBtn');
   const retryButton = document.getElementById('retryButton');
   
+  // Download buttons
+  const downloadHtmlBtn = document.getElementById('downloadHtmlBtn');
+  const downloadTextBtn = document.getElementById('downloadTextBtn');
+  const downloadImagesBtn = document.getElementById('downloadImagesBtn');
+  const downloadJsonBtn = document.getElementById('downloadJsonBtn');
+  
+  // Image view controls
+  const viewGridBtn = document.getElementById('viewGridBtn');
+  const viewListBtn = document.getElementById('viewListBtn');
+  const selectAllImages = document.getElementById('selectAllImages');
+  const deselectAllImages = document.getElementById('deselectAllImages');
+  const downloadSingleImage = document.getElementById('downloadSingleImage');
+  
   // Control elements
   const copyTextBtn = document.getElementById('copyTextBtn');
   const textSearchInput = document.getElementById('textSearchInput');
@@ -78,15 +91,63 @@ document.addEventListener('DOMContentLoaded', function() {
     const usePlaywright = document.getElementById('playwright').checked;
     
     if (url) {
+      showLoading();
+      hideError();
       scrapeWebsite(url, usePlaywright);
     }
   });
   
   // Clear results
   clearResultsBtn.addEventListener('click', function() {
-    hideResults();
+    resultContainer.style.display = 'none';
     document.getElementById('url').value = '';
     currentScrapedData = null;
+    selectedImages.clear();
+    updateSelectedImagesCount();
+  });
+  
+  // Image view controls
+  viewGridBtn.addEventListener('click', function() {
+    const imagesContainer = document.getElementById('imagesContainer');
+    imagesContainer.classList.remove('images-list');
+    imagesContainer.classList.add('images-grid');
+    
+    viewGridBtn.classList.add('active');
+    viewListBtn.classList.remove('active');
+  });
+  
+  viewListBtn.addEventListener('click', function() {
+    const imagesContainer = document.getElementById('imagesContainer');
+    imagesContainer.classList.remove('images-grid');
+    imagesContainer.classList.add('images-list');
+    
+    viewListBtn.classList.add('active');
+    viewGridBtn.classList.remove('active');
+  });
+  
+  // Image selection controls
+  selectAllImages.addEventListener('click', function() {
+    document.querySelectorAll('.image-checkbox').forEach(checkbox => {
+      checkbox.checked = true;
+      const imageSrc = checkbox.getAttribute('data-src');
+      selectedImages.add(imageSrc);
+      
+      const imageItem = checkbox.closest('.image-item');
+      if (imageItem) {
+        imageItem.classList.add('selected');
+      }
+    });
+    updateSelectedImagesCount();
+  });
+  
+  deselectAllImages.addEventListener('click', function() {
+    document.querySelectorAll('.image-checkbox').forEach(checkbox => {
+      checkbox.checked = false;
+      const imageItem = checkbox.closest('.image-item');
+      if (imageItem) {
+        imageItem.classList.remove('selected');
+      }
+    });
     selectedImages.clear();
     updateSelectedImagesCount();
   });
@@ -127,6 +188,16 @@ document.addEventListener('DOMContentLoaded', function() {
     filterLinks('all');
   });
   
+  function updateLinkFilterButtons(activeFilter) {
+    [showAllLinks, filterInternalLinks, filterExternalLinks].forEach(btn => {
+      btn.classList.remove('active');
+    });
+    
+    if (activeFilter === 'all') showAllLinks.classList.add('active');
+    if (activeFilter === 'internal') filterInternalLinks.classList.add('active');
+    if (activeFilter === 'external') filterExternalLinks.classList.add('active');
+  }
+  
   linksSearchInput.addEventListener('input', function() {
     filterLinksBySearch(this.value);
   });
@@ -164,13 +235,58 @@ document.addEventListener('DOMContentLoaded', function() {
     }
   });
   
-  // Download buttons
+  // Download buttons - FIXED VERSION
   downloadAllBtn.addEventListener('click', function() {
     if (!currentScrapedData) {
       alert('No data to download');
       return;
     }
-    downloadAsJson(currentScrapedData);
+    downloadAsZip(currentScrapedData);
+  });
+  
+  downloadHtmlBtn.addEventListener('click', function() {
+    if (!currentScrapedData) {
+      alert('No HTML content to download');
+      return;
+    }
+    const htmlContent = currentScrapedData.html || '<html><body>No HTML content</body></html>';
+    const filename = generateFilename('page', 'html');
+    downloadFile(htmlContent, 'text/html', filename);
+  });
+  
+  downloadTextBtn.addEventListener('click', function() {
+    if (!currentScrapedData) {
+      alert('No text content to download');
+      return;
+    }
+    const textContent = currentScrapedData.textContent || 'No text content';
+    const filename = generateFilename('content', 'txt');
+    downloadFile(textContent, 'text/plain', filename);
+  });
+  
+  downloadImagesBtn.addEventListener('click', function() {
+    if (selectedImages.size === 0) {
+      alert('Please select at least one image to download');
+      return;
+    }
+    downloadSelectedImagesAsZip();
+  });
+  
+  downloadJsonBtn.addEventListener('click', function() {
+    if (!currentScrapedData) {
+      alert('No data to download');
+      return;
+    }
+    const jsonContent = JSON.stringify(currentScrapedData, null, 2);
+    const filename = generateFilename('scraped-data', 'json');
+    downloadFile(jsonContent, 'application/json', filename);
+  });
+  
+  downloadSingleImage.addEventListener('click', function() {
+    const src = modalImage.src;
+    const alt = modalImageAlt.textContent;
+    const filename = generateImageFilename(alt, src);
+    downloadImage(src, filename);
   });
   
   // Helper functions
@@ -214,66 +330,84 @@ document.addEventListener('DOMContentLoaded', function() {
   
   async function scrapeWebsite(url, usePlaywright) {
     try {
-      updateProgress('Connecting to server...', 30);
-      
-      const response = await fetch('http://localhost:5000/scrape', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          url: url,
-          usePlaywright: usePlaywright
-        })
-      });
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Server returned ${response.status}`);
-      }
-      
-      updateProgress('Processing website content...', 70);
-      
-      const data = await response.json();
-      
-      updateProgress('Finalizing...', 100);
-      
-      // Wait a bit to show 100% progress
-      setTimeout(() => {
-        currentScrapedData = data;
-        populateResults(data);
-        showResults();
-        hideLoading();
-        showNotification('Website scraped successfully!');
-      }, 500);
-      
+        updateProgress('Connecting to server...', 30);
+        
+        console.log('Sending scrape request for:', url);
+        
+        const response = await fetch('/scrape', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url: url,
+                usePlaywright: usePlaywright
+            })
+        });
+        
+        console.log('Response status:', response.status, response.statusText);
+        
+        if (!response.ok) {
+            let errorData;
+            try {
+                errorData = await response.json();
+                throw new Error(errorData.error || `Server returned ${response.status}: ${response.statusText}`);
+            } catch (e) {
+                if (e.message.includes('JSON')) {
+                    throw new Error(`Server error: ${response.status} ${response.statusText}`);
+                }
+                throw e;
+            }
+        }
+        
+        let data;
+        try {
+            data = await response.json();
+            console.log('Received data:', data);
+        } catch (e) {
+            console.error('JSON parse error:', e);
+            throw new Error('Invalid JSON response from server');
+        }
+        
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        
+        updateProgress('Processing website content...', 70);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        updateProgress('Finalizing...', 100);
+        
+        setTimeout(() => {
+            currentScrapedData = data;
+            populateResults(data);
+            showResults();
+            hideLoading();
+            showNotification('Website scraped successfully!');
+        }, 500);
+        
     } catch (error) {
-      console.error('Scraping error:', error);
-      showError(`Failed to scrape website: ${error.message}`);
+        console.error('Scraping error:', error);
+        showError(`Failed to scrape website: ${error.message}`);
     }
   }
   
   function populateResults(data) {
     currentScrapedData = data;
     
-    // Update result URL and title
     const resultUrl = document.getElementById('resultUrl');
     const resultTitle = document.getElementById('resultTitle');
     if (resultUrl) resultUrl.textContent = data.url;
     if (resultTitle) resultTitle.innerHTML = `<i class="fas fa-file-alt"></i> Scraping Results: ${data.title}`;
     
-    // Update stats
     updateStat('statTitleLength', data.titleLength);
     updateStat('statLinks', data.linksCount);
     updateStat('statImages', data.imagesCount);
     updateStat('statHeadings', data.headingsCount);
     updateStat('statWords', data.wordCount);
     
-    // Update badges
     updateBadge('linksBadge', data.linksCount);
     updateBadge('imagesBadge', data.imagesCount);
     
-    // Update page information
     updateInfo('infoUrl', data.url);
     updateInfo('infoTitle', data.title);
     updateInfo('infoDescription', data.description);
@@ -281,7 +415,6 @@ document.addEventListener('DOMContentLoaded', function() {
     updateInfo('infoContentSize', data.contentSize);
     updateInfo('infoWordCount', data.wordCount);
     
-    // Update content summary
     const contentSummary = document.getElementById('contentSummary');
     if (data.textContent) {
       contentSummary.textContent = data.textContent.substring(0, 500) + 
@@ -290,27 +423,21 @@ document.addEventListener('DOMContentLoaded', function() {
       contentSummary.textContent = 'No content available';
     }
     
-    // Update extracted text
     const extractedText = document.getElementById('extractedText');
     extractedText.textContent = data.textContent || 'No text content extracted.';
     extractedText.setAttribute('data-original', data.textContent || '');
     
-    // Populate headings table
     populateHeadingsTable(data.headings);
     
-    // Populate links
     currentLinks = data.links || [];
     populateLinksTable(currentLinks);
     
-    // Populate images
     currentImages = data.images || [];
     populateImages(currentImages);
     
-    // Populate metadata tables
     populateMetadataTable(data.metadata);
     populateOpenGraphTable(data.openGraph);
     
-    // Populate HTML source
     const htmlSource = document.getElementById('htmlSource');
     htmlSource.textContent = data.html || 'No HTML source available';
   }
@@ -420,18 +547,15 @@ document.addEventListener('DOMContentLoaded', function() {
       `;
       container.appendChild(imageItem);
       
-      // Add image click event for modal
       const img = imageItem.querySelector('.image-thumb');
       img.addEventListener('click', () => {
         openImageModal(image.src, image.alt, image.width, image.height);
       });
       
-      // Add error handling for broken images
       img.addEventListener('error', function() {
         this.src = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjAwIiBoZWlnaHQ9IjE1MCIgdmlld0JveD0iMCAwIDIwMCAxNTAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIyMDAiIGhlaWdodD0iMTUwIiBmaWxsPSIjMzMzIi8+Cjx0ZXh0IHg9IjEwMCIgeT0iNzUiIGZvbnQtZmFtaWx5PSJBcmlhbCwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iIzk5OSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZG9taW5hbnQtYmFzZWxpbmU9Im1pZGRsZSI+SW1hZ2UgTm90IEF2YWlsYWJsZTwvdGV4dD4KPC9zdmc+';
       });
       
-      // Add checkbox event
       const checkbox = imageItem.querySelector('.image-checkbox');
       checkbox.addEventListener('change', function() {
         if (this.checked) {
@@ -486,16 +610,6 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
-  function updateLinkFilterButtons(activeFilter) {
-    [showAllLinks, filterInternalLinks, filterExternalLinks].forEach(btn => {
-      btn.classList.remove('active');
-    });
-    
-    if (activeFilter === 'all') showAllLinks.classList.add('active');
-    if (activeFilter === 'internal') filterInternalLinks.classList.add('active');
-    if (activeFilter === 'external') filterExternalLinks.classList.add('active');
-  }
-  
   function filterLinks(type) {
     if (!currentLinks.length) return;
     
@@ -545,7 +659,6 @@ document.addEventListener('DOMContentLoaded', function() {
     
     modal.style.display = 'block';
     
-    // Try to get image size
     getImageSize(src).then(size => {
       modalImageSize.textContent = size ? formatFileSize(size) : 'Unknown';
     }).catch(() => {
@@ -578,7 +691,6 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   
   function formatHtml(html) {
-    // Simple HTML formatting
     let formatted = '';
     let indent = 0;
     
@@ -595,7 +707,6 @@ document.addEventListener('DOMContentLoaded', function() {
     navigator.clipboard.writeText(text).then(() => {
       showNotification(successMessage);
     }).catch(() => {
-      // Fallback
       const textArea = document.createElement('textarea');
       textArea.value = text;
       document.body.appendChild(textArea);
@@ -606,38 +717,264 @@ document.addEventListener('DOMContentLoaded', function() {
     });
   }
   
+  // Enhanced Download Functions
+  function downloadFile(content, mimeType, filename) {
+    try {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showNotification(`Downloaded: ${filename}`);
+    } catch (error) {
+      console.error('Download error:', error);
+      showNotification('Download failed. Please try again.');
+    }
+  }
+  
+  function downloadImage(src, filename) {
+    try {
+      const a = document.createElement('a');
+      a.href = src;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showNotification(`Downloaded: ${filename}`);
+    } catch (error) {
+      console.error('Image download error:', error);
+      showNotification('Image download failed. Please try again.');
+    }
+  }
+  
+  async function downloadSelectedImagesAsZip() {
+    if (selectedImages.size === 0) return;
+    
+    try {
+      showNotification(`Preparing ${selectedImages.size} images for download...`);
+      
+      // Check if JSZip is available
+      if (typeof JSZip === 'undefined') {
+        // Fallback: download images individually
+        downloadSelectedImagesIndividually();
+        return;
+      }
+      
+      const zip = new JSZip();
+      let completed = 0;
+      const errors = [];
+      
+      // Create a folder for images
+      const imgFolder = zip.folder("images");
+      
+      // Fetch and add each selected image to the ZIP
+      for (const [index, src] of Array.from(selectedImages).entries()) {
+        try {
+          const response = await fetch(src);
+          if (!response.ok) {
+            errors.push(`Failed to fetch: ${src}`);
+            continue;
+          }
+          
+          const blob = await response.blob();
+          const extension = getImageExtensionFromBlob(blob) || getImageExtensionFromUrl(src) || 'jpg';
+          const filename = `image-${index + 1}.${extension}`;
+          
+          imgFolder.file(filename, blob);
+          completed++;
+        } catch (error) {
+          console.error(`Error fetching image ${src}:`, error);
+          errors.push(`Failed: ${src}`);
+        }
+      }
+      
+      if (completed > 0) {
+        const zipBlob = await zip.generateAsync({type: 'blob'});
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `images-${new Date().getTime()}.zip`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        if (errors.length > 0) {
+          showNotification(`Downloaded ${completed} images (${errors.length} failed)`);
+        } else {
+          showNotification(`Successfully downloaded ${completed} images as ZIP`);
+        }
+      } else {
+        showNotification('No images could be downloaded');
+      }
+    } catch (error) {
+      console.error('ZIP creation failed:', error);
+      // Fallback to individual downloads
+      downloadSelectedImagesIndividually();
+    }
+  }
+  
+  function downloadSelectedImagesIndividually() {
+    let count = 0;
+    selectedImages.forEach(src => {
+      setTimeout(() => {
+        try {
+          const extension = getImageExtensionFromUrl(src) || 'jpg';
+          const filename = `image-${count + 1}.${extension}`;
+          downloadImage(src, filename);
+        } catch (error) {
+          console.error(`Error downloading image ${src}:`, error);
+        }
+      }, count * 300); // Stagger downloads to avoid browser issues
+      count++;
+    });
+    
+    showNotification(`Downloading ${selectedImages.size} images individually...`);
+  }
+  
+  async function downloadAsZip(data) {
+    try {
+      showNotification('Preparing complete dataset for download...');
+      
+      if (typeof JSZip === 'undefined') {
+        // Fallback: download JSON only
+        downloadAsJson(data);
+        return;
+      }
+      
+      const zip = new JSZip();
+      
+      // Add JSON data
+      zip.file("scraped-data.json", JSON.stringify(data, null, 2));
+      
+      // Add HTML content
+      if (data.html) {
+        zip.file("page.html", data.html);
+      }
+      
+      // Add text content
+      if (data.textContent) {
+        zip.file("content.txt", data.textContent);
+      }
+      
+      // Add images if any are selected
+      if (selectedImages.size > 0) {
+        const imgFolder = zip.folder("images");
+        let imageCount = 0;
+        
+        for (const src of Array.from(selectedImages).slice(0, 20)) { // Limit to 20 images to avoid timeout
+          try {
+            const response = await fetch(src);
+            if (response.ok) {
+              const blob = await response.blob();
+              const extension = getImageExtensionFromBlob(blob) || getImageExtensionFromUrl(src) || 'jpg';
+              const filename = `image-${++imageCount}.${extension}`;
+              imgFolder.file(filename, blob);
+            }
+          } catch (error) {
+            console.error(`Error fetching image for ZIP: ${src}`, error);
+          }
+        }
+      }
+      
+      const zipBlob = await zip.generateAsync({type: 'blob'});
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `web-scraper-data-${new Date().getTime()}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      showNotification('Complete dataset downloaded as ZIP');
+    } catch (error) {
+      console.error('Complete ZIP download failed:', error);
+      // Fallback to JSON only
+      downloadAsJson(data);
+    }
+  }
+  
   function downloadAsJson(data) {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `scraped-data-${Date.now()}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    const jsonContent = JSON.stringify(data, null, 2);
+    const filename = generateFilename('scraped-data', 'json');
+    downloadFile(jsonContent, 'application/json', filename);
+  }
+  
+  // Utility functions for download
+  function generateFilename(base, extension) {
+    const timestamp = new Date().getTime();
+    return `${base}-${timestamp}.${extension}`;
+  }
+  
+  function generateImageFilename(alt, src) {
+    let filename = 'image';
+    
+    if (alt && alt !== 'No alt text' && alt !== '') {
+      filename = alt.replace(/[^a-z0-9]/gi, '_').substring(0, 50);
+    }
+    
+    const extension = getImageExtensionFromUrl(src) || 'jpg';
+    const timestamp = new Date().getTime();
+    
+    return `${filename}-${timestamp}.${extension}`;
+  }
+  
+  function getImageExtensionFromUrl(url) {
+    try {
+      const pathname = new URL(url).pathname;
+      const match = pathname.match(/\.(jpg|jpeg|png|gif|webp|bmp|svg)$/i);
+      return match ? match[1].toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  }
+  
+  function getImageExtensionFromBlob(blob) {
+    const type = blob.type;
+    if (type.includes('jpeg')) return 'jpg';
+    if (type.includes('png')) return 'png';
+    if (type.includes('gif')) return 'gif';
+    if (type.includes('webp')) return 'webp';
+    if (type.includes('bmp')) return 'bmp';
+    if (type.includes('svg')) return 'svg';
+    return null;
   }
   
   function showNotification(message) {
+    // Remove existing notifications
+    document.querySelectorAll('.custom-notification').forEach(notification => {
+      notification.remove();
+    });
+    
     const notification = document.createElement('div');
     notification.textContent = message;
+    notification.className = 'custom-notification';
     notification.style.cssText = `
       position: fixed;
       top: 20px;
       right: 20px;
-      background: var(--success);
+      background: var(--success, #28a745);
       color: white;
       padding: 12px 20px;
       border-radius: 8px;
       z-index: 10000;
       box-shadow: 0 4px 12px rgba(0,0,0,0.3);
       font-weight: 600;
+      max-width: 300px;
+      word-wrap: break-word;
     `;
     document.body.appendChild(notification);
     
     setTimeout(() => {
-      document.body.removeChild(notification);
-    }, 3000);
+      if (notification.parentNode) {
+        document.body.removeChild(notification);
+      }
+    }, 4000);
   }
   
   function escapeRegExp(string) {
